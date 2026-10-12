@@ -2,6 +2,10 @@
 
 SprintBoard is a lightweight Jira/Trello-style issue tracker built as a **pure software engineering portfolio project**. It focuses on API design, relational data modeling, clean architecture, validation, testing, and CI rather than flashy algorithms.
 
+## Demo
+
+![SprintBoard Demo](sprintboard-demo.png)
+
 ## What it does
 
 - Create projects
