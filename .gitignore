@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+.pytest_cache/
+.DS_Store
+
+GITHUB_SETUP.md
+INTERVIEW_CHEATSHEET.md

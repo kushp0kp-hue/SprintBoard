@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SprintBoard</title>
+  <meta name="description" content="A lightweight software issue tracker built with Flask and SQLite.">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="logo">SB</div>
+      <div><strong>SprintBoard</strong><span>Software issue tracker</span></div>
+    </div>
+    <button class="primary" id="new-issue-button">+ New issue</button>
+  </header>
+
+  <main class="shell">
+    <aside class="sidebar">
+      <p class="section-label">PROJECTS</p>
+      <div id="project-list"></div>
+      <form id="project-form" class="compact-form">
+        <input id="project-name" placeholder="New project name" required>
+        <button type="submit">Add project</button>
+      </form>
+      <div class="sidebar-note">
+        <strong>Built like a real SWE app</strong>
+        <p>REST API, relational database, service/repository layers, filtering, validation, tests, and CI.</p>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="content-header">
+        <div>
+          <p class="eyebrow">PROJECT</p>
+          <h1 id="project-title">SprintBoard</h1>
+          <p id="project-description">Select a project to view issues.</p>
+        </div>
+        <div class="filters">
+          <input id="search-filter" placeholder="Search issues">
+          <select id="status-filter">
+            <option value="">All statuses</option>
+            <option value="todo">To do</option>
+            <option value="in_progress">In progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="done">Done</option>
+          </select>
+          <select id="priority-filter">
+            <option value="">All priorities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+      </div>
+      <div id="issue-board" class="issue-board"></div>
+    </section>
+  </main>
+
+  <dialog id="issue-dialog">
+    <form id="issue-form" method="dialog" class="dialog-form">
+      <div class="dialog-header">
+        <div><p class="eyebrow">CREATE</p><h2>New issue</h2></div>
+        <button type="button" class="ghost" id="close-dialog">×</button>
+      </div>
+      <label>Title<input id="issue-title" required></label>
+      <label>Description<textarea id="issue-description" rows="5"></textarea></label>
+      <div class="two-col">
+        <label>Status<select id="issue-status">
+          <option value="todo">To do</option><option value="in_progress">In progress</option>
+          <option value="blocked">Blocked</option><option value="done">Done</option>
+        </select></label>
+        <label>Priority<select id="issue-priority">
+          <option value="medium">Medium</option><option value="high">High</option>
+          <option value="critical">Critical</option><option value="low">Low</option>
+        </select></label>
+      </div>
+      <label>Assignee<input id="issue-assignee" placeholder="e.g. Kush"></label>
+      <label>Labels<input id="issue-labels" placeholder="frontend, bug, api"></label>
+      <button class="primary" type="submit">Create issue</button>
+    </form>
+  </dialog>
+
+  <script>
+    let projects = [];
+    let currentProjectId = null;
+    const columns = [["todo","To do"],["in_progress","In progress"],["blocked","Blocked"],["done","Done"]];
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, {headers:{"Content-Type":"application/json",...(options.headers||{})}, ...options});
+      if (!response.ok) {
+        let message = "Request failed";
+        try { const data = await response.json(); message = data.error || message; } catch (_) {}
+        throw new Error(message);
+      }
+      if (response.status === 204) return null;
+      return response.json();
+    }
+
+    async function loadProjects() {
+      projects = await api("/api/projects");
+      const list = document.getElementById("project-list");
+      list.innerHTML = projects.map(project => `
+        <button class="project-item ${project.id===currentProjectId?"active":""}" onclick="selectProject(${project.id})">
+          <span>${escapeHtml(project.name)}</span><small>#${project.id}</small>
+        </button>`).join("");
+      if (!currentProjectId && projects.length) await selectProject(projects[0].id, false);
+      if (!projects.length) document.getElementById("issue-board").innerHTML = '<div class="empty-state">Create a project to start tracking issues.</div>';
+    }
+
+    async function selectProject(projectId, refreshProjects = true) {
+      currentProjectId = projectId;
+      const project = projects.find(p => p.id === projectId);
+      document.getElementById("project-title").textContent = project?.name || "Project";
+      document.getElementById("project-description").textContent = project?.description || "Track work across your project.";
+      if (refreshProjects) await loadProjects();
+      await loadIssues();
+    }
+
+    async function loadIssues() {
+      if (!currentProjectId) return;
+      const params = new URLSearchParams();
+      const q = document.getElementById("search-filter").value.trim();
+      const status = document.getElementById("status-filter").value;
+      const priority = document.getElementById("priority-filter").value;
+      if (q) params.set("q", q); if (status) params.set("status", status); if (priority) params.set("priority", priority);
+      const issues = await api(`/api/projects/${currentProjectId}/issues?${params}`);
+      renderBoard(issues);
+    }
+
+    function renderBoard(issues) {
+      const board = document.getElementById("issue-board");
+      board.innerHTML = columns.map(([status,label]) => {
+        const matching = issues.filter(issue => issue.status === status);
+        return `<section class="column">
+          <div class="column-header"><strong>${label}</strong><span>${matching.length}</span></div>
+          <div class="cards">${matching.map(renderIssue).join("") || '<div class="column-empty">No issues</div>'}</div>
+        </section>`;
+      }).join("");
+    }
+
+    function renderIssue(issue) {
+      const labels = issue.labels.map(label => `<span class="tag">${escapeHtml(label)}</span>`).join("");
+      return `<article class="issue-card">
+        <div class="issue-meta"><span>#${issue.id}</span><span class="priority ${issue.priority}">${issue.priority}</span></div>
+        <h3>${escapeHtml(issue.title)}</h3><p>${escapeHtml(issue.description || "No description")}</p>
+        <div class="tags">${labels}</div>
+        <div class="issue-footer"><span>${escapeHtml(issue.assignee || "Unassigned")}</span>
+          <select onchange="changeStatus(${issue.id}, this.value)">${columns.map(([value,label]) => `<option value="${value}" ${issue.status===value?"selected":""}>${label}</option>`).join("")}</select>
+        </div></article>`;
+    }
+
+    async function changeStatus(issueId, status) {
+      await api(`/api/issues/${issueId}`, {method:"PATCH", body:JSON.stringify({status})});
+      await loadIssues();
+    }
+
+    document.getElementById("project-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const project = await api("/api/projects", {method:"POST", body:JSON.stringify({name:document.getElementById("project-name").value.trim()})});
+      event.target.reset(); currentProjectId = project.id; await loadProjects();
+    });
+
+    const dialog = document.getElementById("issue-dialog");
+    document.getElementById("new-issue-button").addEventListener("click", () => {
+      if (!currentProjectId) return alert("Create a project first.");
+      dialog.showModal();
+    });
+    document.getElementById("close-dialog").addEventListener("click", () => dialog.close());
+    document.getElementById("issue-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const labels = document.getElementById("issue-labels").value.split(",").map(v=>v.trim()).filter(Boolean);
+      await api(`/api/projects/${currentProjectId}/issues`, {method:"POST", body:JSON.stringify({
+        title:document.getElementById("issue-title").value,
+        description:document.getElementById("issue-description").value,
+        status:document.getElementById("issue-status").value,
+        priority:document.getElementById("issue-priority").value,
+        assignee:document.getElementById("issue-assignee").value,
+        labels
+      })});
+      event.target.reset(); dialog.close(); await loadIssues();
+    });
+
+    let searchTimer;
+    document.getElementById("search-filter").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadIssues, 250); });
+    document.getElementById("status-filter").addEventListener("change", loadIssues);
+    document.getElementById("priority-filter").addEventListener("change", loadIssues);
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[char]);
+    }
+    loadProjects().catch(error => alert(error.message));
+  </script>
+</body>
+</html>
